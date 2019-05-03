@@ -23,6 +23,9 @@ import jinja2
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from cp_sqlalchemy import SQLAlchemyTool, SQLAlchemyPlugin
+import tornado
+import tornado.httpserver
+import tornado.wsgi
 
 from config import get_config
 from models import Base, RedirectList, RedirectLink, Edit
@@ -316,7 +319,7 @@ class Root:
         url = ''.join(kwargs.get('url', '').split())
         cherrypy.log(kwargs.get('returnto', ''))
         lists = [kwargs.get('lists', [])]
-        lists.extend([set(kwargs.get('otherlists', []).split())])
+        lists.extend(list(set(kwargs.get('otherlists', []).split())))
 
         if title and url:
             link = self.db.query(RedirectLink).filter_by(url=url).first()
@@ -437,15 +440,24 @@ def main():
 
     print("Cherrypy conf: %s" % conf)
 
-    cherrypy.tree.mount(Root(), "/", config=conf)
 
     cherrypy.tools.db = SQLAlchemyTool()
     dbpath = os.environ.get('GO_DATABASE') or config.get('cfg_fnDatabase', 'sqlite:///f5go.db')
     sqlalchemy_plugin = SQLAlchemyPlugin(cherrypy.engine, Base, dbpath, echo=True)
     sqlalchemy_plugin.subscribe()
     sqlalchemy_plugin.create()
+
+    cherrypy.config.update({'engine.autoreload.on': False})
+    cherrypy.server.unsubscribe()
     cherrypy.engine.start()
-    cherrypy.engine.block()
+
+    go = cherrypy.tree.mount(Root(), "/", config=conf)
+    container = tornado.wsgi.WSGIContainer(go)
+    http_server = tornado.httpserver.HTTPServer(container)
+    http_server.listen(int(config.get('cfg_port', 8080)))
+
+    tornado.ioloop.PeriodicCallback(lambda: cherrypy.engine.publish('main'), 100).start()
+    tornado.ioloop.IOLoop.instance().start()
 
 
 if __name__ == "__main__":

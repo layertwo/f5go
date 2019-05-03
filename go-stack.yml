@@ -1,0 +1,49 @@
+version: "3.7"
+services:
+  traefik:
+    image: traefik
+    command: --web \
+      --docker \
+      --docker.swarmmode \
+      --docker.watch \
+      --logLevel=DEBUG
+    networks:
+      - go-net
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /dev/null:/traefik.toml
+    deploy:
+      placement:
+        constraints: [node.role==manager]
+
+  redirector:
+    image: f5go:latest
+    networks:
+      - go-net
+    depends_on:
+      - godb
+    deploy:
+      replicas: 2
+      labels:
+        - "traefik.backend=go_redirector"
+        - "traefik.enable=true"
+        - "traefik.port=8080"
+        - "traefik.docker.network=go_go-net"
+        - "traefik.frontend.rule=Host:go"
+    environment:
+        GO_DATABASE: "postgresql://postgres@godb/postgres"
+
+  godb:
+    image: postgres
+    networks:
+      - go-net
+    deploy:
+      replicas: 1
+    ports:
+      - "5432:5432"
+
+networks:
+  go-net:
